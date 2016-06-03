@@ -12,7 +12,7 @@
 /* jshint nomen:false */
 /* global define, require, window, document, location, Blob, FormData */
 
-;(function (factory) {
+(function (factory) {
     'use strict';
     if (typeof define === 'function' && define.amd) {
         // Register as an anonymous AMD module:
@@ -300,6 +300,8 @@
             this.timestamp = ((Date.now) ? Date.now() : (new Date()).getTime());
             this.loaded = 0;
             this.bitrate = 0;
+
+            // 计算传输速度
             this.getBitrate = function (now, loaded, interval) {
                 var timeDiff = now - this.timestamp;
                 if (!this.bitrate || !interval || timeDiff > interval) {
@@ -311,6 +313,13 @@
             };
         },
 
+        // 是否使用XHR 上传，条件如下：
+        // 1. 如果强制使用Iframe 上传，则False，使用Iframe 的文件上传其实都是multipart/form-data 的
+        // 2. 如果支持multipart 且支持FormData，则True
+        // 3. 如果不支持multipart 且支持xhr2，则True
+        // 4. 如果不支持multipart 且不支持xhr2，则False（此时使用Iframe 上传）
+
+        // 从上面的条件看出，如果支持xhr2，则文件上传优先以FormData 格式封装和传输
         _isXHRUpload: function (options) {
             return !options.forceIframeTransport &&
                 ((!options.multipart && $.support.xhrFileUpload) ||
@@ -382,6 +391,11 @@
                 loaded = Math.floor(
                     e.loaded / e.total * (data.chunkSize || data._progress.total)
                 ) + (data.uploadedBytes || 0);
+
+                // 注意下面的this._progress 和data._progress
+                // 一个是当前上传的progress 事件触发时的数据
+                // 一个是当前上传数据
+
                 // Add the difference from the previously loaded state
                 // to the global loaded counter:
                 this._progress.loaded += (loaded - data._progress.loaded);
@@ -414,6 +428,7 @@
             }
         },
 
+        // 监听xhr 上传progress 事件
         _initProgressListener: function (options) {
             var that = this,
                 xhr = options.xhr ? options.xhr() : $.ajaxSettings.xhr();
@@ -730,6 +745,13 @@
                 promise = dfd.promise(),
                 jqXHR,
                 upload;
+
+            // 检测当次上传是否会使用chunk 分块上传，条件如下：
+            // 1. 如果有data 属性，则不使用chunk
+            // 2. 如果不使用XHR 上传，则不使用chunk
+            // 3. 如果不支持blob 数据类型，则不使用chunk
+            // 4. 如果插件初始化时传入的已上传大小uploadedBytes 有效，则使用chunk
+            // 5. 如果最大chunk size 小于文件大小，则使用chunk
             if (!(this._isXHRUpload(options) && slice && (ub || mcs < fs)) ||
                     options.data) {
                 return false;
@@ -990,6 +1012,10 @@
             if (limitSize && files[0].size === undefined) {
                 limitSize = undefined;
             }
+
+            // 下面根据配置singleFileUploads、limitMultiFileUploads、limitMultiFileUploadSize
+            // 来决定发起多少个XHR 请求，每个XHR 请求的包含多少数据量
+            // 每个XHR 请求除了数据本身外，还要有一个一一对应的paramName
             if (!(options.singleFileUploads || limit || limitSize) ||
                     !this._isXHRUpload(options)) {
                 fileSet = [files];
@@ -1026,6 +1052,8 @@
             } else {
                 paramNameSet = paramName;
             }
+
+            // 上面将文件按配置处理好fileSet 和ParamNameSet 后，就开始初始化上传操作
             data.originalFiles = files;
             $.each(fileSet || files, function (index, element) {
                 var newData = $.extend({}, data);
@@ -1046,10 +1074,14 @@
 
         _replaceFileInput: function (data) {
             var input = data.fileInput,
+                // 考虑到file input 本身不会有子节点，所以，只需要复制节点本身的data 和event handler 即可
+                // 所以，只需要一个true 参数
                 inputClone = input.clone(true),
                 restoreFocus = input.is(document.activeElement);
             // Add a reference for the new cloned file input to the data argument:
             data.fileInputClone = inputClone;
+
+            // 隐式创建一个form，将克隆的input 插进去，然后通过重置form 的状态来让克隆input 的value 清空，状态清空
             $('<form></form>').append(inputClone)[0].reset();
             // Detaching allows to insert the fileInput on another form
             // without loosing the file input value:
@@ -1351,6 +1383,7 @@
                 /^\/.*\/[igm]{0,3}$/.test(value);
         },
 
+        // 将HTML5 的data-attributes 的属性值写入组件实例的options 属性中
         _initDataAttributes: function () {
             var that = this,
                 options = this.options,
